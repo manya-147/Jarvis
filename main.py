@@ -9,13 +9,17 @@ import news
 import time
 import pygame
 from gtts import gTTS
-from openai import OpenAI
+from ddgs import DDGS
 import os
 import sys
+from dotenv import load_dotenv
+from google import genai
+load_dotenv()
+print(os.getenv("GEMINI_API_KEY"))
 
 recogniser=sr.Recognizer()
 engine=pyttsx3.init()
-API_KEY="2db421fe60a84464a8cce6744e99ba0e"
+API_KEY= os.getenv("NEWS_API_KEY")
 
 def speak_old(text):
     subprocess.run(["say", text])
@@ -31,29 +35,50 @@ def speak(text):
     while pygame.mixer.music.get_busy():
         pygame.time.Clock().tick(10)
 
-client = OpenAI(
-    base_url="http://127.0.0.1:11434/v1",
-    api_key="ollama"   # Can be any string; Ollama ignores it.
+client = genai.Client(
+    api_key=os.getenv("GEMINI_API_KEY")
 )
+
+def web_search(query):
+    with DDGS() as ddgs:
+        results = ddgs.text(query, max_results=5)
+
+    if not results:
+        return "No search results found."
+
+    context = ""
+
+    for result in results:
+        title = result.get("title", "")
+        body = result.get("body", "")
+        context += f"{title}\n{body}\n\n"
+
+    return context
 
 def processcmd(c):
     print("Command received:", c)
     if "open google" in c.lower():
         webbrowser.open("https://www.google.com/")
+        return
     elif "open facebook" in c.lower():
         webbrowser.open("https://www.facebook.com/")
+        return
     elif "open youtube" in c.lower():
         webbrowser.open("https://www.youtube.com/")
+        return
     elif "open linkedin" in c.lower():
         webbrowser.open("https://in.linkedin.com/")
+        return
     elif c.lower().startswith("play"):
         song=c.lower().split(" ")[1]
         link=musiclib.music(song)
         webbrowser.open(link)
+        return
     elif c.lower().startswith("news"):
         topic=c.lower().split(" ")[1] 
         link=news.new(topic) 
         webbrowser.open(link)
+        return
     elif c.lower().startswith("headlines"):
         url = f"https://newsapi.org/v2/everything?q=india&sortBy=publishedAt&language=en&apiKey={API_KEY}"
         
@@ -68,24 +93,31 @@ def processcmd(c):
                 print(f"Speaking headline {i}: {title}")
                 speak(title)
         print("Finished speaking headlines.")
+        return
         
-    completion = client.chat.completions.create(
-        model="llama3.2",   # Or "qwen2.5:1.5b" if you've downloaded it.
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a virtual assistant, Jarvis skilled in tasks like Alexa . Short responses only"
-            },
-            {
-                "role": "user",
-                "content": c
-            }
-        ]
+    with DDGS() as ddgs:
+        search_results = web_search(c)
+    prompt = f"""
+    You are Jarvis, a helpful virtual assistant like Alexa.
+    Use the web search results below if they contain relevant information.
+    Otherwise, answer using your own knowledge.
+    Give short results.
+
+    Web Search Results:
+    {search_results}
+
+    User:
+    {c}
+    """
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash-lite",
+        contents=prompt
     )
-    me=completion.choices[0].message.content
+
+    me = response.text
     print(me)
     speak(me)
-    
 
 if( __name__=="__main__"):
     speak("Initialising Jarvis....")
